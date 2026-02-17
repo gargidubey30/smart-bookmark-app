@@ -9,21 +9,34 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [bookmarks, setBookmarks] = useState<any[]>([]);
 
-  // Get user on mount
+  // Get logged in user on mount
   useEffect(() => {
+    const getUser = async () => {
+      const { data } = await supabase.auth.getUser();
+
+      if (data.user) {
+        setUser(data.user);
+        fetchBookmarks(data.user.id);
+      }
+    };
+
     getUser();
   }, []);
 
-  const getUser = async () => {
-    const { data } = await supabase.auth.getUser();
+  // Fetch bookmarks once
+  const fetchBookmarks = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("bookmarks")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
 
-    if (data.user) {
-      setUser(data.user);
-      fetchBookmarks(data.user.id);
+    if (!error) {
+      setBookmarks(data || []);
     }
   };
 
-  // Realtime subscription (PRODUCTION SAFE)
+  // Proper realtime incremental updates
   useEffect(() => {
     if (!user) return;
 
@@ -37,8 +50,16 @@ export default function Home() {
           table: "bookmarks",
           filter: `user_id=eq.${user.id}`,
         },
-        () => {
-          fetchBookmarks(user.id);
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            setBookmarks((prev) => [payload.new, ...prev]);
+          }
+
+          if (payload.eventType === "DELETE") {
+            setBookmarks((prev) =>
+              prev.filter((b) => b.id !== payload.old.id)
+            );
+          }
         }
       )
       .subscribe();
@@ -48,22 +69,10 @@ export default function Home() {
     };
   }, [user]);
 
-  const fetchBookmarks = async (userId: string) => {
-    const { data, error } = await supabase
-      .from("bookmarks")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (!error) {
-      setBookmarks(data || []);
-    }
-  };
-
   const addBookmark = async () => {
     if (!title || !url || !user) return;
 
-    const { error } = await supabase.from("bookmarks").insert([
+    await supabase.from("bookmarks").insert([
       {
         title,
         url,
@@ -71,23 +80,20 @@ export default function Home() {
       },
     ]);
 
-    if (!error) {
-      setTitle("");
-      setUrl("");
-    }
+    setTitle("");
+    setUrl("");
   };
 
- const deleteBookmark = async (id: string) => {
-  if (!user) return;
+  const deleteBookmark = async (id: string) => {
+    if (!user) return;
 
-  // Optimistically remove from UI
-  setBookmarks((prev) => prev.filter((b) => b.id !== id));
-
-  await supabase.from("bookmarks").delete().eq("id", id);
-};
+    await supabase.from("bookmarks").delete().eq("id", id);
+  };
 
   const handleLogin = async () => {
-    await supabase.auth.signInWithOAuth({ provider: "google" });
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+    });
   };
 
   const handleLogout = async () => {
