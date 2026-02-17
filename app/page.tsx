@@ -77,11 +77,14 @@ export default function Home() {
     }
   };
 
-  const deleteBookmark = async (id: string) => {
-    if (!user) return;
+ const deleteBookmark = async (id: string) => {
+  if (!user) return;
 
-    await supabase.from("bookmarks").delete().eq("id", id);
-  };
+  // Optimistically remove from UI
+  setBookmarks((prev) => prev.filter((b) => b.id !== id));
+
+  await supabase.from("bookmarks").delete().eq("id", id);
+};
 
   const handleLogin = async () => {
     await supabase.auth.signInWithOAuth({ provider: "google" });
