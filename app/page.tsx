@@ -9,32 +9,44 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [bookmarks, setBookmarks] = useState<any[]>([]);
 
+  // Get user on mount
   useEffect(() => {
     getUser();
   }, []);
 
   const getUser = async () => {
     const { data } = await supabase.auth.getUser();
+
     if (data.user) {
       setUser(data.user);
       fetchBookmarks(data.user.id);
-      supabase
-  .channel("bookmarks-changes")
-  .on(
-    "postgres_changes",
-    {
-      event: "*",
-      schema: "public",
-      table: "bookmarks",
-      filter: `user_id=eq.${data.user.id}`,
-    },
-    () => {
-      fetchBookmarks(data.user.id);
-    }
-  )
-  .subscribe();
     }
   };
+
+  // Realtime subscription (PRODUCTION SAFE)
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel("bookmarks-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bookmarks",
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchBookmarks(user.id);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
 
   const fetchBookmarks = async (userId: string) => {
     const { data, error } = await supabase
@@ -43,11 +55,13 @@ export default function Home() {
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
-    if (!error) setBookmarks(data || []);
+    if (!error) {
+      setBookmarks(data || []);
+    }
   };
 
   const addBookmark = async () => {
-    if (!title || !url) return;
+    if (!title || !url || !user) return;
 
     const { error } = await supabase.from("bookmarks").insert([
       {
@@ -60,13 +74,13 @@ export default function Home() {
     if (!error) {
       setTitle("");
       setUrl("");
-      fetchBookmarks(user.id);
     }
   };
 
   const deleteBookmark = async (id: string) => {
+    if (!user) return;
+
     await supabase.from("bookmarks").delete().eq("id", id);
-    fetchBookmarks(user.id);
   };
 
   const handleLogin = async () => {
